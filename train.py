@@ -40,7 +40,8 @@ def train():
     for i, batch in enumerate(tqdm(test_loader)):
         data, labels = batch
         data, labels = data.to(device), labels.to(device)
-        preds = model.forward(data)
+        output = model(data)
+        preds = output["predictions"]
         ground_truth = ground_truth + list(labels.cpu().numpy())
         predictions =  predictions + list(preds.cpu().numpy())
     print("Acuracy: {}".format(accuracy_score(np.array(ground_truth), np.array(predictions))))

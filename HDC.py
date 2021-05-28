@@ -1,6 +1,7 @@
 import torch as th
 from typing import Optional, Tuple, List
 import numpy as np
+from typing import Union, Tuple, List
 
 
 class MNISTHDC:
@@ -34,10 +35,14 @@ class MNISTHDC:
         encoded = th.sum(encoded, dim=1) - self.channel_vectors.shape[0]//2  #Bundling
         return th.clip(encoded, 0, 1) #Majority rule
 
-    def forward(self, input: th.Tensor) -> th.Tensor:
+    def __call__(self, input : th.Tensor) -> dict:
+        return self.forward(input)
+    
+    def forward(self, input: th.Tensor) -> dict:
         encoded = self._encode(input)
         scores = th.cdist(encoded.float(), self.binary_model.float(), p=0) #Hamming distance
-        return scores.argmin(dim=1)
+        output = dict(scores=scores, predictions=scores.argmin(dim=1))
+        return output
     
     def fit(self, input: th.Tensor, labels: th.Tensor) -> None:
         encoded = self._encode(input)
