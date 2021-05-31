@@ -1,6 +1,9 @@
 import numpy as np
 import skimage.measure
 from scipy.special import softmax
+from train import *
+import matplotlib.pyplot as plt
+import torch as th
 
 def fitness(X_adv,X_true, label, model):
     """
@@ -21,10 +24,11 @@ def fitness(X_adv,X_true, label, model):
     ### Here evaluate our sample and get back the distances/simlarities, as well as the prediction###
     ### Change this depending on how we call our model to run predictions###
     dists, pred = evaluate(model,X_adv)
-    f_true = dists[label]
+    f_true = dists[:,label]
+    dists = dists.T
     
     ###Assumes that we get back the distances/similarities as a list or np.array###
-    best = np.max(np.append(dists[:label], dists[label+1:]) - f_true)
+    best = np.min(np.append(dists[:label], dists[label+1:],axis=0) - f_true , axis=0)
     
     ###TODO? Add Regularization term###
     
@@ -65,7 +69,7 @@ def CGC(parent_1, parent_2, cross_p, mut_p, s_max, beta=0):
     critical_genes = pooled > beta
     
     #Perform Crossover on critical genes
-    mask = np.random.choice([0,1],size=X.shape,p=[1 - cross_p,cross_p])
+    mask = np.random.choice([0,1],size=parent_1.shape,p=[1 - cross_p,cross_p])
     crossover = critical_genes*(mask*parent_1 + (1-mask)*parent_2)
     child = (pooled == 0)*child.flatten() + crossover
     
@@ -125,17 +129,12 @@ def pertAdj(X_adv,X_true,y,model):
             dist,label = evaluate(model, X_adv)
     return X_adv
 
-def adv_attack(model, X, y, N, i_max=1000,alg='GA-CGC',PA=True):
+def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
     """
-
-    The main function for adversarial attacks
-
-    Call this function to find an adversarial sample for a model
-
     ------------Input-------------
     model: The model being attacked
-    X: The initial sample/datapoint
-    y: The true label of X
+    X: The initial sample/datapoint. SHOULD BE A TENSOR
+    y: The true label of X. SHOULD BE AN INTEGER
     N: The population size of the algorithm
     i_max: Maximum amount of iterations to run the algorithm for
     alg: What version of the algorithm to use.
@@ -153,10 +152,11 @@ def adv_attack(model, X, y, N, i_max=1000,alg='GA-CGC',PA=True):
     Vector - The Adversarial sample if we have found one, else the closest sample we have
     
     """
-    
-    
+    sample_np = X.numpy()
+    gene_max = np.max(sample_np)
+    gene_min = np.min(sample_np)
     ### Sigma max, the maximum perturbation value ###
-    s_max = int(np.max(X)*0.15)
+    s_max = int(gene_max*0.15)
     
     ### The chance of a gene mutating ###
     mut_p=0.05
@@ -168,17 +168,19 @@ def adv_attack(model, X, y, N, i_max=1000,alg='GA-CGC',PA=True):
     # Initialize the population
     for i in range(N):
         if alg == 'GA-CGC':
-            child = CGC(X, X, 1, 1,s_max)
+            child = CGC(sample_np, sample_np, 1, 1,s_max)
         else:
-            child = np.copy(X) + noise(X,1,s_max)
+            child = np.copy(sample_np) + noise(sample_np,1,s_max)
+        child = np.clip(child,gene_min,gene_max)
         population.append(child)
         
     #Run the genetic algorithm for i_max iterations
     successful = False
     for i in range(i_max):
-        
+        ppl = np.array(population)
+        print(ppl.shape)
         #find fitness score for each sample in the population
-        scores = [fitness(sample,X,y,model) for sample in population]
+        scores = fitness(ppl,X,y,model)
         
         #Save the best sample for the next generation
         eli = population[np.argmax(scores)]
@@ -195,7 +197,7 @@ def adv_attack(model, X, y, N, i_max=1000,alg='GA-CGC',PA=True):
             if alg == 'GA':
                 
                 #Basic GA Algortithm
-                p = scores[parents[0]]/(scores[parents[0]] + scores[parents[1]])
+                p = safe_division(scores[parents[0]],(scores[parents[0]] + scores[parents[1]]))
                 mask = np.random.choice([0,1],size=X.shape,p=[1 - p,p])
                 child = mask*population[parents[0]] + (1 - mask)*population[parents[1]]
                 child += noise(child,mut_p,s_max)
@@ -203,22 +205,47 @@ def adv_attack(model, X, y, N, i_max=1000,alg='GA-CGC',PA=True):
                 
                 #Find the most probable parent, then use CGC function to find children
                 if scores[parents[0]] > scores[parents[1]]:
-                    p = scores[parents[0]]/(scores[parents[0]] + scores[parents[1]])
+                    p = safe_division(scores[parents[0]],(scores[parents[0]] + scores[parents[1]]))
                     child = CGC(population[parents[0]],population[parents[1]],p,mut_p,s_max)
                 else:
-                    p = scores[parents[1]]/(scores[parents[0]] + scores[parents[1]])
+                    p = safe_division(scores[parents[1]],(scores[parents[0]] + scores[parents[1]]))
                     child = CGC(population[parents[1]],population[parents[0]],p,mut_p,s_max)
                     
             #Clip child to fit within proper values
-            child = np.clip(child,np.min(X),np.max(X))
+            child = np.clip(child,gene_min,gene_max)
             next_pop.append(child)
         population = next_pop
         next_pop=[]
     if successful:
-        eli = np.clip(eli,0,255)
+        eli = np.clip(eli,gene_min,gene_max)
         if PA:
             eli = pertAdj(eli,X,y,model)
         return successful, eli
     else:
         return successful, eli
-                
+
+def safe_division(n, d):
+    return n / d if d else 0    
+
+def evaluate(model, X):
+    if len(X.shape) == 1:
+        ten = model(th.from_numpy(X.reshape(1,X.shape[0])))
+    else:
+        ten = model(th.from_numpy(X))
+    return ten['scores'].numpy(), ten['predictions'].numpy()
+
+if __name__ == "__main__":
+    from sklearn import datasets
+    X, y = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
+    idx = np.random.choice(range(X.shape[0]))
+    model = train()
+    success, image = adv_attack(model, th.from_numpy(X[idx]), int(y[idx]), 6)
+    fig, axs = plt.subplots(nrows=2, sharex=True,figsize=(4,9))
+    axs[0].set_title('Original Image')
+    axs[0].imshow(X[idx].reshape(28,28),cmap='Greys')
+
+    axs[1].set_title('Adversarial Image')
+    axs[1].imshow(image.reshape(28,28),cmap='Greys')
+
+    plt.show()
+
