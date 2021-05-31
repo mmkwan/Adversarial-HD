@@ -45,6 +45,7 @@ def train():
         ground_truth = ground_truth + list(labels.cpu().numpy())
         predictions =  predictions + list(preds.cpu().numpy())
     print("Acuracy: {}".format(accuracy_score(np.array(ground_truth), np.array(predictions))))
+    return model
 
 if __name__ == "__main__":
     train()
