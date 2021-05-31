@@ -1,9 +1,12 @@
 import numpy as np
 import skimage.measure
+import pickle as pkl
 from scipy.special import softmax
 from train import *
 import matplotlib.pyplot as plt
 import torch as th
+
+DEVICE = th.device("cuda") if th.cuda.is_available() else th.device("cpu")
 
 def fitness(X_adv,X_true, label, model):
     """
@@ -229,17 +232,20 @@ def safe_division(n, d):
 
 def evaluate(model, X):
     if len(X.shape) == 1:
-        ten = model(th.from_numpy(X.reshape(1,X.shape[0])))
+        model_input = th.from_numpy(np.expand_dims(X, axis=0)).to(DEVICE)
     else:
-        ten = model(th.from_numpy(X))
-    return ten['scores'].numpy(), ten['predictions'].numpy()
+        model_input = th.from_numpy(X).to(DEVICE)
+    ten = model(model_input)
+    return ten['scores'].cpu().numpy(), ten['predictions'].cpu().numpy()
 
 if __name__ == "__main__":
     from sklearn import datasets
     X, y = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
     idx = np.random.choice(range(X.shape[0]))
-    model = train()
-    success, image = adv_attack(model, th.from_numpy(X[idx]), int(y[idx]), 6)
+    with open("model.pk", "rb") as f:
+        model = pkl.load(f)
+    model = model.to(DEVICE)
+    success, image = adv_attack(model, th.from_numpy(X[idx]), int(y[idx]), 32)
     fig, axs = plt.subplots(nrows=2, sharex=True,figsize=(4,9))
     axs[0].set_title('Original Image')
     axs[0].imshow(X[idx].reshape(28,28),cmap='Greys')

@@ -7,6 +7,7 @@ import numpy as np
 from HDC import MNISTHDC
 from tqdm import tqdm
 import torch as th
+import pickle as pkl
 
 class MNIST(Dataset):
     def __init__(self, inputs: np.ndarray, labels: np.ndarray) -> None:
@@ -26,10 +27,10 @@ def train():
     dataset.target = le.fit_transform(dataset.target)
     dataset.data = np.array(dataset.data)
     X_train, X_test, y_train, y_test = train_test_split(dataset.data, dataset.target, test_size=0.2, shuffle=True)
-    train_loader = DataLoader(MNIST(X_train, y_train), batch_size=64, shuffle=True)
-    test_loader = DataLoader(MNIST(X_test, y_test), batch_size=64, shuffle=True)
+    train_loader = DataLoader(MNIST(X_train, y_train), batch_size=32, shuffle=True)
+    test_loader = DataLoader(MNIST(X_test, y_test), batch_size=32, shuffle=True)
     device = th.device("cuda") if th.cuda.is_available() else th.device("cpu")
-    model = MNISTHDC(10)
+    model = MNISTHDC(10, value_quantize_precision=2)
     model = model.to(device)
     for i, batch in enumerate(tqdm(train_loader)):
         data, labels = batch
@@ -45,7 +46,9 @@ def train():
         ground_truth = ground_truth + list(labels.cpu().numpy())
         predictions =  predictions + list(preds.cpu().numpy())
     print("Acuracy: {}".format(accuracy_score(np.array(ground_truth), np.array(predictions))))
-    return model
+    model = model.to("cpu")
+    with open("model_2.pk", "wb") as f:
+        pkl.dump(model, f)
 
 if __name__ == "__main__":
     train()
