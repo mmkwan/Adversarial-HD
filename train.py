@@ -28,7 +28,6 @@ def train():
     dataset.data = np.array(dataset.data)
     X_train, X_test, y_train, y_test = train_test_split(dataset.data, dataset.target, test_size=0.2, shuffle=True)
     train_loader = DataLoader(MNIST(X_train, y_train), batch_size=32, shuffle=True)
-    test_loader = DataLoader(MNIST(X_test, y_test), batch_size=32, shuffle=True)
     device = th.device("cuda") if th.cuda.is_available() else th.device("cpu")
     model = MNISTHDC(10, value_quantize_precision=2)
     model = model.to(device)
@@ -36,18 +35,8 @@ def train():
         data, labels = batch
         data, labels = data.to(device), labels.to(device)
         model.fit(data, labels)
-    predictions = []
-    ground_truth = []
-    for i, batch in enumerate(tqdm(test_loader)):
-        data, labels = batch
-        data, labels = data.to(device), labels.to(device)
-        output = model(data)
-        preds = output["predictions"]
-        ground_truth = ground_truth + list(labels.cpu().numpy())
-        predictions =  predictions + list(preds.cpu().numpy())
-    print("Acuracy: {}".format(accuracy_score(np.array(ground_truth), np.array(predictions))))
     model = model.to("cpu")
-    with open("model_2.pk", "wb") as f:
+    with open("model.pk", "wb") as f:
         pkl.dump(model, f)
 
 if __name__ == "__main__":

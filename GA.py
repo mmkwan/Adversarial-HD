@@ -5,6 +5,10 @@ from scipy.special import softmax
 from train import *
 import matplotlib.pyplot as plt
 import torch as th
+from typing import Union, Optional
+from tqdm import tqdm
+from argparse import ArgumentParser
+from sklearn import datasets
 
 DEVICE = th.device("cuda") if th.cuda.is_available() else th.device("cpu")
 
@@ -36,7 +40,7 @@ def fitness(X_adv,X_true, label, model):
     ###TODO? Add Regularization term###
     
     ###If the model returns distances , this  is return -1*best. If it's similarities, this is return best###
-    return -1*best
+    return -best
 
 def CGC(parent_1, parent_2, cross_p, mut_p, s_max, beta=0):
     """
@@ -72,16 +76,16 @@ def CGC(parent_1, parent_2, cross_p, mut_p, s_max, beta=0):
     critical_genes = pooled > beta
     
     #Perform Crossover on critical genes
-    mask = np.random.choice([0,1],size=parent_1.shape,p=[1 - cross_p,cross_p])
-    crossover = critical_genes*(mask*parent_1 + (1-mask)*parent_2)
-    child = (pooled == 0)*child.flatten() + crossover
+    mask = np.random.choice([0,1], size=parent_1.shape, p=[1 - cross_p,cross_p])
+    crossover = critical_genes*(mask*  parent_1 + (1-mask) * parent_2)
+    child = (pooled == 0) * child.flatten() + crossover
     
     #Add noise to critical genes
     mut = noise(parent_1, mut_p, s_max)
-    child += critical_genes*mut
+    child += critical_genes * mut
     return child
 
-def noise(X, mut_p,s_max):
+def noise(X: np.ndarray, mut_p: np.ndarray, s_max: int):
     """
     Generates uniformly distributed noise for a sample X
     
@@ -92,11 +96,11 @@ def noise(X, mut_p,s_max):
     returns the noise. Must be added to the original sample.
     
     """
-    noise = np.random.choice([i for i in range(-1*s_max,s_max)],size=X.shape)
-    mask = np.random.choice([0,1],size=X.shape,p=[1 - mut_p,mut_p])
-    return mask*noise
+    noise = np.random.choice([i for i in range(-s_max,s_max)], size=X.shape)
+    mask = np.random.choice([0,1], size=X.shape, p=[1 - mut_p, mut_p])
+    return mask * noise
 
-def pertAdj(X_adv,X_true,y,model):
+def pertAdj(X_adv: np.ndarray,X_true: np.ndarray,y: int, model):
     """
     Perturbation adjustment.
     
@@ -122,21 +126,21 @@ def pertAdj(X_adv,X_true,y,model):
         X_adv[idx] = orig
         
         ###Change this based on how we call the model to do predictions###
-        dist,label = evaluate(model, X_adv)
+        dist, label = evaluate(model, X_adv)
         
         #Iterate until the label changes
         while label == y:
             X_adv[idx] += i
 
             ### Change to the same as above###
-            dist,label = evaluate(model, X_adv)
+            dist, label = evaluate(model, X_adv)
     return X_adv
 
-def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
+def adv_attack(model, X: np.ndarray, y: int, N: int, i_max: Optional[int]=10000, alg: Optional[str]='GA-CGC', use_PA: Optional[bool]=True):
     """
     ------------Input-------------
     model: The model being attacked
-    X: The initial sample/datapoint. SHOULD BE A TENSOR
+    X: The initial sample/datapoint. SHOULD BE A NUMPY ARRAY
     y: The true label of X. SHOULD BE AN INTEGER
     N: The population size of the algorithm
     i_max: Maximum amount of iterations to run the algorithm for
@@ -154,10 +158,14 @@ def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
     
     Vector - The Adversarial sample if we have found one, else the closest sample we have
     
+    raises:
+        NotImplementedError: if the algorithm is not implemented
     """
-    sample_np = X.numpy()
-    gene_max = np.max(sample_np)
-    gene_min = np.min(sample_np)
+    if alg not in ["GA", "GA-CGC"]:
+        raise NotImplementedError("Algorithm not implemented")
+
+    gene_max = np.max(X)
+    gene_min = np.min(X)
     ### Sigma max, the maximum perturbation value ###
     s_max = int(gene_max*0.15)
     
@@ -171,9 +179,9 @@ def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
     # Initialize the population
     for i in range(N):
         if alg == 'GA-CGC':
-            child = CGC(sample_np, sample_np, 1, 1,s_max)
+            child = CGC(X, X, 1, 1,s_max)
         else:
-            child = np.copy(sample_np) + noise(sample_np,1,s_max)
+            child = np.copy(X) + noise(X,1,s_max)
         child = np.clip(child,gene_min,gene_max)
         population.append(child)
         
@@ -181,7 +189,6 @@ def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
     successful = False
     for i in range(i_max):
         ppl = np.array(population)
-        print(ppl.shape)
         #find fitness score for each sample in the population
         scores = fitness(ppl,X,y,model)
         
@@ -221,7 +228,7 @@ def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
         next_pop=[]
     if successful:
         eli = np.clip(eli,gene_min,gene_max)
-        if PA:
+        if use_PA:
             eli = pertAdj(eli,X,y,model)
         return successful, eli
     else:
@@ -230,28 +237,63 @@ def adv_attack(model, X, y, N, i_max=10000,alg='GA-CGC',PA=True):
 def safe_division(n, d):
     return n / d if d else 0    
 
-def evaluate(model, X):
-    if len(X.shape) == 1:
-        model_input = th.from_numpy(np.expand_dims(X, axis=0)).to(DEVICE)
-    else:
-        model_input = th.from_numpy(X).to(DEVICE)
-    ten = model(model_input)
-    return ten['scores'].cpu().numpy(), ten['predictions'].cpu().numpy()
+def circular_increment(idx, max_idx):
+    idx = idx + 1
+    if idx > max_idx:
+        idx = 0
+    return idx
+
+
+def evaluate(model, X: np.ndarray):
+    model_input = th.from_numpy(X).to(DEVICE)
+    if len(model_input.shape) == 1:
+        model_input.unsqueeze_(0)
+    output = model(model_input)
+    scores = output['scores'].cpu().numpy()
+    predictions = output['predictions'].cpu().numpy()    
+    return scores, predictions
+
+def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: str, samples_per_class: int = 200, population_size: int = 32):
+    adversarial_X = []
+    adversarial_y = []
+    generated_classes = [0] * 10
+    used_idx = set()
+    idx = np.random.choice(range(X.shape[0]))
+    done = False
+    pbar = tqdm(total=samples_per_class*10)
+    while not done:
+        next_idx_good = False
+        while not next_idx_good:
+            idx = circular_increment(idx, y.shape[0]-1)
+            if generated_classes[y[idx]] != samples_per_class and idx not in used_idx:
+                _, prediction = evaluate(model, X[idx])
+                if prediction[0] != y[idx]:
+                    used_idx.add(idx)
+                    next_idx_good = True
+        original_image, label =  X[idx], y[idx]
+        success, image = adv_attack(model, original_image, label, N=population_size, i_max=250)
+        if success:
+            adversarial_X.append(image)
+            adversarial_y.append(label)
+            generated_classes[label] += 1
+            pbar.update(1)
+        if all(generated_class == samples_per_class for generated_class in generated_classes):
+            done = True
+    adversarial_X = np.array(adversarial_X)
+    adversarial_y = np.array(adversarial_y)
+    np.savez(save_path, X=adversarial_X, y=adversarial_y)
+        
 
 if __name__ == "__main__":
-    from sklearn import datasets
+    parser = ArgumentParser()
+    parser.add_argument("--model_path", type=str, required=True)
+    parser.add_argument("--save_path", type=str, required=True)
+    parser.add_argument("--samples", type=int, required=False, default=200)
+    args = parser.parse_args()
     X, y = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
-    idx = np.random.choice(range(X.shape[0]))
-    with open("model.pk", "rb") as f:
+    y = y.astype('int8')
+    with open(args.model_path, "rb") as f:
         model = pkl.load(f)
     model = model.to(DEVICE)
-    success, image = adv_attack(model, th.from_numpy(X[idx]), int(y[idx]), 32)
-    fig, axs = plt.subplots(nrows=2, sharex=True,figsize=(4,9))
-    axs[0].set_title('Original Image')
-    axs[0].imshow(X[idx].reshape(28,28),cmap='Greys')
-
-    axs[1].set_title('Adversarial Image')
-    axs[1].imshow(image.reshape(28,28),cmap='Greys')
-
-    plt.show()
+    create_adversarial_dataset(X, y, model, args.save_path, samples_per_class=args.samples)
 
