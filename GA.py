@@ -265,7 +265,7 @@ def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: s
     used_idx = set()
     idx = np.random.choice(range(X.shape[0]))
     done = False
-    #pbar = tqdm(total=samples_per_class*10, leave=False, position=1, desc="generation")
+    pbar = tqdm(total=samples_per_class*10, leave=False, position=1, desc="generation")
     while not done:
         next_idx_good = False
         while not next_idx_good:
@@ -282,7 +282,7 @@ def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: s
             adversarial_X.append(image)
             adversarial_y.append(label)
             generated_classes[label] += 1
-            #pbar.update(1)
+            pbar.update(1)
         else:
             failure_count[label] += 1
         if all(generated_class == samples_per_class for generated_class in generated_classes):
@@ -296,13 +296,12 @@ def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: s
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--model_path", type=str, required=True)
-    parser.add_argument("--save_path", type=str, required=True)
-    parser.add_argument("--samples", type=int, required=False, default=200)
+    parser.add_argument("--model_path", type=str, required=True, help="Pickled model to load")
+    parser.add_argument("--save_path", type=str, required=True, help="File path to save genereated data (.npz)")
+    parser.add_argument("--samples", type=int, required=False, default=200, help="Number of samples per-digit to generate")
     args = parser.parse_args()
     X, y = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
     y = y.astype('int8')
-    models = []
     with open(args.model_path, "rb") as f:
         model = pkl.load(f)
     model = model.to(DEVICE)
