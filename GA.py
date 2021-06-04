@@ -5,10 +5,13 @@ from scipy.special import softmax
 from train import *
 import matplotlib.pyplot as plt
 import torch as th
-from typing import Union, Optional
+from typing import Union, Optional, List
 from tqdm import tqdm
 from argparse import ArgumentParser
 from sklearn import datasets
+import seaborn as sns
+import pandas as pd
+
 
 DEVICE = th.device("cuda") if th.cuda.is_available() else th.device("cpu")
 
@@ -253,14 +256,16 @@ def evaluate(model, X: np.ndarray):
     predictions = output['predictions'].cpu().numpy()    
     return scores, predictions
 
-def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: str, samples_per_class: int = 200, population_size: int = 32):
+def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: str, samples_per_class: int = 200, population_size: int = 32) -> List[int]:
     adversarial_X = []
+    clean_X = []
     adversarial_y = []
+    failure_count = [0] * 10
     generated_classes = [0] * 10
     used_idx = set()
     idx = np.random.choice(range(X.shape[0]))
     done = False
-    pbar = tqdm(total=samples_per_class*10)
+    #pbar = tqdm(total=samples_per_class*10, leave=False, position=1, desc="generation")
     while not done:
         next_idx_good = False
         while not next_idx_good:
@@ -271,18 +276,23 @@ def create_adversarial_dataset(X: np.ndarray, y: np.ndarray, model, save_path: s
                     used_idx.add(idx)
                     next_idx_good = True
         original_image, label =  X[idx], y[idx]
-        success, image = adv_attack(model, original_image, label, N=population_size, i_max=250)
+        success, image = adv_attack(model, original_image, label, N=population_size, i_max=25)
         if success:
+            clean_X.append(original_image)
             adversarial_X.append(image)
             adversarial_y.append(label)
             generated_classes[label] += 1
-            pbar.update(1)
+            #pbar.update(1)
+        else:
+            failure_count[label] += 1
         if all(generated_class == samples_per_class for generated_class in generated_classes):
             done = True
+    clean_X = np.array(clean_X)
     adversarial_X = np.array(adversarial_X)
     adversarial_y = np.array(adversarial_y)
-    np.savez(save_path, X=adversarial_X, y=adversarial_y)
-        
+    np.savez(save_path, X=adversarial_X, clean_X = clean_X, y=adversarial_y)
+    return failure_count
+         
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -292,8 +302,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     X, y = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
     y = y.astype('int8')
+    models = []
     with open(args.model_path, "rb") as f:
         model = pkl.load(f)
     model = model.to(DEVICE)
-    create_adversarial_dataset(X, y, model, args.save_path, samples_per_class=args.samples)
+    failures = create_adversarial_dataset(X, y, model, args.save_path, samples_per_class=args.samples)
 
